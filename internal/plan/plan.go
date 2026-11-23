@@ -19,13 +19,49 @@ type Household struct {
 	Unavailable []int    `json:"unavailable"`
 }
 
+// Purpose values for Settings.Purpose. The empty string and
+// PurposeFlag both mean the original flag duty; data written before
+// the preset existed has no purpose field and reads as flag duty.
+const (
+	PurposeFlag   = "flag"
+	PurposePickup = "pickup"
+)
+
 // Settings is the duty period and the extra days off the user added
 // on top of weekends and national holidays (school events, makeup
 // holidays, and so on). Dates are "2006-01-02" strings.
+//
+// Purpose selects what the table is for: flag duty (旗当番, the
+// default) or pickup duty (お迎え当番). DismissalTimes optionally
+// records the school dismissal time ("15:04") per date; dismissal
+// times vary from day to day, so they are keyed by date, not by
+// weekday. They only take effect under the pickup preset.
 type Settings struct {
-	Start   string   `json:"start"`
-	End     string   `json:"end"`
-	DaysOff []string `json:"days_off"`
+	Start          string            `json:"start"`
+	End            string            `json:"end"`
+	DaysOff        []string          `json:"days_off"`
+	Purpose        string            `json:"purpose"`
+	DismissalTimes map[string]string `json:"dismissal_times"`
+}
+
+// DutyLabel is the Japanese name of the duty the settings select:
+// お迎え当番 for the pickup preset, 旗当番 otherwise.
+func (s Settings) DutyLabel() string {
+	if s.Purpose == PurposePickup {
+		return "お迎え当番"
+	}
+	return "旗当番"
+}
+
+// DismissalTime returns the dismissal time ("15:04") recorded for
+// the date, or "" when none applies. Under the flag preset times are
+// never used, so flag-duty output stays exactly as it has always
+// been even if time data is present in the file.
+func (s Settings) DismissalTime(date string) string {
+	if s.Purpose != PurposePickup {
+		return ""
+	}
+	return s.DismissalTimes[date]
 }
 
 // Assignment is one filled slot: one household at one spot on one day.
@@ -72,6 +108,9 @@ func (p *Plan) Normalize() {
 	}
 	if p.Settings.DaysOff == nil {
 		p.Settings.DaysOff = []string{}
+	}
+	if p.Settings.DismissalTimes == nil {
+		p.Settings.DismissalTimes = map[string]string{}
 	}
 	if p.Assignments == nil {
 		p.Assignments = []Assignment{}
@@ -126,6 +165,19 @@ func (p *Plan) Validate() error {
 	for _, d := range p.Settings.DaysOff {
 		if _, err := ParseDate(d); err != nil {
 			return fmt.Errorf("休業日 %q の形式が不正です", d)
+		}
+	}
+	switch p.Settings.Purpose {
+	case "", PurposeFlag, PurposePickup:
+	default:
+		return fmt.Errorf("用途 %q が不正です", p.Settings.Purpose)
+	}
+	for d, tm := range p.Settings.DismissalTimes {
+		if _, err := ParseDate(d); err != nil {
+			return fmt.Errorf("下校時刻の日付 %q の形式が不正です", d)
+		}
+		if _, err := time.Parse("15:04", tm); err != nil {
+			return fmt.Errorf("%s の下校時刻 %q の形式が不正です", d, tm)
 		}
 	}
 	return nil
