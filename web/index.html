@@ -19,7 +19,7 @@
   h2 { font-size: 16px; margin: 0 0 12px; border-left: 4px solid var(--accent); padding-left: 8px; }
   h3 { font-size: 14px; margin: 18px 0 8px; }
   label { font-size: 13px; }
-  input[type="text"], input[type="date"], textarea, select {
+  input[type="text"], input[type="date"], input[type="time"], textarea, select {
     font-size: 14px; padding: 5px 7px; border: 1px solid #bbb; border-radius: 4px; }
   textarea { width: 100%; min-height: 90px; }
   button { font-size: 14px; padding: 6px 14px; border: 1px solid var(--accent);
@@ -56,16 +56,29 @@
 </head>
 <body>
 <header>
-  <h1>HataBan（はたばん）— 旗当番表メーカー</h1>
-  <p>名簿と期間を入れるだけで、旗当番の割り振り表を作ります。データはこのパソコンの中だけに保存され、外部に送信されることはありません。</p>
+  <h1>HataBan（はたばん）— <span id="duty-title">旗当番</span>表メーカー</h1>
+  <p>名簿と期間を入れるだけで、<span id="duty-intro">旗当番</span>の割り振り表を作ります。データはこのパソコンの中だけに保存され、外部に送信されることはありません。</p>
 </header>
 <main>
 
 <section class="no-print" id="sec-settings">
   <h2>1. 期間と休業日</h2>
   <div class="row">
+    <label>用途
+      <select id="purpose">
+        <option value="flag">旗当番</option>
+        <option value="pickup">お迎え当番</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
     <label>開始日 <input type="date" id="start"></label>
     <label>終了日 <input type="date" id="end"></label>
+  </div>
+  <div id="dismissal-block" style="display:none">
+    <h3>下校時刻（日ごと・任意）</h3>
+    <p class="note">下校時刻は日によって変わるため、日ごとにそのまま入れてください。入れた日は印刷・CSV・カレンダー出力に時刻が載ります。空欄の日は時刻なしで出力されます。期間を変えたら、一度「名簿・設定を保存」を押すとその期間の登校日が並びます。</p>
+    <div id="dismissal-list"></div>
   </div>
   <p class="note">対象になるのは平日（月〜金）のうち、日本の祝日と下の休業日を除いた日です。祝日は自動で計算します。</p>
   <div class="row">
@@ -116,7 +129,7 @@
 </section>
 
 <section id="sec-result">
-  <h2>4. 旗当番表</h2>
+  <h2>4. <span id="duty-heading">旗当番</span>表</h2>
   <div id="problems"></div>
   <h3>世帯別の担当回数</h3>
   <div id="counts"></div>
@@ -159,11 +172,59 @@ function setMsg(id, text, isErr) {
 // ---------- editors ----------
 
 function renderEditors() {
+  document.getElementById("purpose").value = purposeOf();
   document.getElementById("start").value = edit.settings.start || "";
   document.getElementById("end").value = edit.settings.end || "";
+  applyPurpose();
   renderDaysOff();
+  renderDismissal();
   renderSpotList();
   renderRoster();
+}
+
+// ---------- purpose & dismissal times ----------
+
+function purposeOf() {
+  return edit.settings.purpose === "pickup" ? "pickup" : "flag";
+}
+
+function dutyLabel() {
+  return purposeOf() === "pickup" ? "お迎え当番" : "旗当番";
+}
+
+function applyPurpose() {
+  const label = dutyLabel();
+  document.title = "HataBan — " + label + "表メーカー";
+  document.getElementById("duty-title").textContent = label;
+  document.getElementById("duty-intro").textContent = label;
+  document.getElementById("duty-heading").textContent = label;
+  document.getElementById("dismissal-block").style.display =
+    purposeOf() === "pickup" ? "" : "none";
+}
+
+function renderDismissal() {
+  const box = document.getElementById("dismissal-list");
+  if (purposeOf() !== "pickup") { box.innerHTML = ""; return; }
+  const times = edit.settings.dismissal_times || {};
+  if (!state.days.length) {
+    box.innerHTML = '<p class="note">期間を設定して保存すると、登校日がここに並びます。</p>';
+    return;
+  }
+  box.innerHTML = state.days.map(d =>
+    `<div class="row" style="margin-bottom:4px"><span style="min-width:9em">${esc(d.date)}（${esc(d.weekday)}）</span>` +
+    `<input type="time" data-dismissal="${esc(d.date)}" value="${esc(times[d.date] || "")}"></div>`).join("");
+}
+
+function collectDismissal() {
+  // Start from the stored values and only touch the dates actually
+  // rendered as inputs, so switching the preset back and forth (or a
+  // period change) never wipes times that are not on screen.
+  const times = Object.assign({}, edit.settings.dismissal_times || {});
+  document.querySelectorAll("[data-dismissal]").forEach(inp => {
+    if (inp.value) times[inp.dataset.dismissal] = inp.value;
+    else delete times[inp.dataset.dismissal];
+  });
+  edit.settings.dismissal_times = times;
 }
 
 function renderDaysOff() {
@@ -223,8 +284,10 @@ function collectRow(tr, i) {
 }
 
 function collectEditors() {
+  edit.settings.purpose = document.getElementById("purpose").value;
   edit.settings.start = document.getElementById("start").value;
   edit.settings.end = document.getElementById("end").value;
+  collectDismissal();
   document.querySelectorAll("#roster-body tr").forEach((tr, i) => collectRow(tr, i));
 }
 
@@ -272,16 +335,23 @@ function renderResult() {
     if (!byMonth.has(m)) byMonth.set(m, []);
     byMonth.get(m).push(k);
   });
+  // The 下校時刻 column appears only under the pickup preset when at
+  // least one day in the table carries a dismissal time.
+  const planTimes = p.settings.dismissal_times || {};
+  const showTime = p.settings.purpose === "pickup" &&
+    keys.some(k => planTimes[k.split("|")[0]]);
   let html = "";
   for (const [month, ks] of byMonth) {
     const [y, m] = month.split("-");
-    html += `<h3>${y}年${Number(m)}月</h3><table><tr><th>日付</th><th>曜日</th><th>地点</th><th>担当世帯</th></tr>`;
+    html += `<h3>${y}年${Number(m)}月</h3><table><tr><th>日付</th><th>曜日</th><th>地点</th>` +
+      (showTime ? `<th>下校時刻</th>` : ``) + `<th>担当世帯</th></tr>`;
     for (const k of ks) {
       const [date, spot] = k.split("|");
       const cur = slotMap.get(k) || "";
       const opts = ['<option value="">（未割り当て）</option>']
         .concat(p.households.map(h => `<option value="${esc(h.name)}" ${h.name === cur ? "selected" : ""}>${esc(h.name)}</option>`)).join("");
       html += `<tr><td>${esc(date)}</td><td>${esc(weekdayOf(date))}</td><td>${esc(spot)}</td>` +
+        (showTime ? `<td>${esc(planTimes[date] || "")}</td>` : ``) +
         `<td><span class="print-name">${esc(cur || "未定")}</span>` +
         `<select data-date="${esc(date)}" data-spot="${esc(spot)}">${opts}</select></td></tr>`;
     }
@@ -328,6 +398,12 @@ async function save() {
   renderResult();
 }
 
+document.getElementById("purpose").onchange = () => {
+  collectDismissal();
+  edit.settings.purpose = document.getElementById("purpose").value;
+  applyPurpose();
+  renderDismissal();
+};
 document.getElementById("dayoff-add").onclick = () => {
   const v = document.getElementById("dayoff-input").value;
   if (v && !edit.settings.days_off.includes(v)) {
