@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HataBan — 旗当番表メーカー</title>
+<!-- HATABAN-APP -->
+<style>
+  :root { --line:#d8d8d8; --accent:#2e7d32; --warn:#b71c1c; --bg:#fafafa; }
+  * { box-sizing: border-box; }
+  body { font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+         margin: 0; background: var(--bg); color: #222; }
+  header { background: var(--accent); color: #fff; padding: 12px 20px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: .9; }
+  main { max-width: 1080px; margin: 0 auto; padding: 16px 20px 60px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 8px;
+            padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; border-left: 4px solid var(--accent); padding-left: 8px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; }
+  label { font-size: 13px; }
+  input[type="text"], input[type="date"], textarea, select {
+    font-size: 14px; padding: 5px 7px; border: 1px solid #bbb; border-radius: 4px; }
+  textarea { width: 100%; min-height: 90px; }
+  button { font-size: 14px; padding: 6px 14px; border: 1px solid var(--accent);
+           background: var(--accent); color: #fff; border-radius: 4px; cursor: pointer; }
+  button.sub { background: #fff; color: var(--accent); }
+  button.danger { background: #fff; color: var(--warn); border-color: var(--warn); padding: 2px 8px; font-size: 12px; }
+  button.big { font-size: 16px; padding: 10px 28px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
+          border-radius: 20px; padding: 3px 6px 3px 12px; margin: 0 6px 6px 0; font-size: 13px; background:#f4f8f4;}
+  .chip button { padding: 0 6px; font-size: 12px; border-radius: 50%; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: #eef4ee; }
+  .wd { white-space: nowrap; }
+  .wd label { margin-right: 2px; font-size: 12px; }
+  .spots label { margin-right: 8px; font-size: 12px; white-space: nowrap; }
+  .note { font-size: 12px; color: #555; }
+  .problems { background: #fdf1f1; border: 1px solid #e5b4b4; border-radius: 6px; padding: 10px 14px; }
+  .problems h3 { color: var(--warn); margin-top: 0; }
+  .msg { font-size: 13px; margin: 8px 0; white-space: pre-line; }
+  .msg.err { color: var(--warn); }
+  .print-name { display: none; }
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff; }
+    main { max-width: none; padding: 0; }
+    section { border: none; padding: 0; }
+    select { display: none !important; }
+    .print-name { display: inline; }
+    table { page-break-inside: avoid; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>HataBan（はたばん）— 旗当番表メーカー</h1>
+  <p>名簿と期間を入れるだけで、旗当番の割り振り表を作ります。データはこのパソコンの中だけに保存され、外部に送信されることはありません。</p>
+</header>
+<main>
+
+<section class="no-print" id="sec-settings">
+  <h2>1. 期間と休業日</h2>
+  <div class="row">
+    <label>開始日 <input type="date" id="start"></label>
+    <label>終了日 <input type="date" id="end"></label>
+  </div>
+  <p class="note">対象になるのは平日（月〜金）のうち、日本の祝日と下の休業日を除いた日です。祝日は自動で計算します。</p>
+  <div class="row">
+    <label>休業日を追加 <input type="date" id="dayoff-input"></label>
+    <button class="sub" id="dayoff-add">追加</button>
+  </div>
+  <div id="dayoff-list"></div>
+</section>
+
+<section class="no-print" id="sec-spots">
+  <h2>2. 地点</h2>
+  <div class="row">
+    <input type="text" id="spot-input" placeholder="例: 正門前">
+    <button class="sub" id="spot-add">地点を追加</button>
+  </div>
+  <div id="spot-list"></div>
+</section>
+
+<section class="no-print" id="sec-roster">
+  <h2>3. 名簿</h2>
+  <p class="note">世帯ごとに、所属する登校班・担当できる地点・不可曜日を入れてください。地点に何もチェックが無い世帯は「どの地点でも可」として扱います。</p>
+  <div style="overflow-x:auto">
+  <table id="roster-table">
+    <thead><tr>
+      <th>世帯名</th><th>登校班</th><th>担当できる地点</th><th>不可曜日</th><th></th>
+    </tr></thead>
+    <tbody id="roster-body"></tbody>
+  </table>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button class="sub" id="row-add">行を追加</button>
+  </div>
+  <h3>一括貼り付け</h3>
+  <p class="note">Excel などから貼り付けできます。1行1世帯、列は「世帯名 / 班 / 担当地点（、区切り）/ 不可曜日（例: 月・水）」の順で、タブ区切りでもカンマ区切りでもかまいません。</p>
+  <textarea id="import-text" placeholder="山田,1班,正門前・郵便局前,月・水"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button class="sub" id="import-btn">貼り付けを取り込む</button>
+  </div>
+  <div class="msg" id="import-msg"></div>
+</section>
+
+<section class="no-print">
+  <div class="row">
+    <button id="save-btn">名簿・設定を保存</button>
+    <button class="big" id="generate-btn">割り振りを生成する</button>
+  </div>
+  <div class="msg" id="main-msg"></div>
+</section>
+
+<section id="sec-result">
+  <h2>4. 旗当番表</h2>
+  <div id="problems"></div>
+  <h3>世帯別の担当回数</h3>
+  <div id="counts"></div>
+  <div class="row no-print" style="margin-top:12px">
+    <button class="sub" onclick="window.print()">印刷する（A4）</button>
+    <button class="sub" id="csv-btn">CSVをダウンロード</button>
+    <button class="sub" id="ics-btn">カレンダー（.ics）をダウンロード</button>
+  </div>
+  <div id="tables"></div>
+</section>
+
+</main>
+<script>
+"use strict";
+const WEEKDAYS = [[1,"月"],[2,"火"],[3,"水"],[4,"木"],[5,"金"],[6,"土"],[0,"日"]];
+let state = null;   // last state from the server
+let edit = null;    // working copy of the master data
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  };
+  const res = await fetch(path, opt);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function setMsg(id, text, isErr) {
+  const el = document.getElementById(id);
+  el.textContent = text || "";
+  el.className = "msg" + (isErr ? " err" : "");
+}
+
+// ---------- editors ----------
+
+function renderEditors() {
+  document.getElementById("start").value = edit.settings.start || "";
+  document.getElementById("end").value = edit.settings.end || "";
+  renderDaysOff();
+  renderSpotList();
+  renderRoster();
+}
+
+function renderDaysOff() {
+  const box = document.getElementById("dayoff-list");
+  box.innerHTML = edit.settings.days_off.map((d, i) =>
+    `<span class="chip">${esc(d)}<button data-dayoff="${i}">×</button></span>`).join("");
+  box.querySelectorAll("button").forEach(b => b.onclick = () => {
+    edit.settings.days_off.splice(Number(b.dataset.dayoff), 1);
+    renderDaysOff();
+  });
+}
+
+function renderSpotList() {
+  const box = document.getElementById("spot-list");
+  box.innerHTML = edit.spots.map((s, i) =>
+    `<span class="chip">${esc(s)}<button data-spot="${i}">×</button></span>`).join("");
+  box.querySelectorAll("button").forEach(b => b.onclick = () => {
+    edit.spots.splice(Number(b.dataset.spot), 1);
+    renderSpotList();
+    renderRoster();
+  });
+}
+
+function renderRoster() {
+  const body = document.getElementById("roster-body");
+  body.innerHTML = "";
+  edit.households.forEach((h, i) => {
+    const tr = document.createElement("tr");
+    const spotChecks = edit.spots.map(s =>
+      `<label><input type="checkbox" data-f="spots" value="${esc(s)}" ${h.spots.includes(s) ? "checked" : ""}>${esc(s)}</label>`).join("");
+    const wdChecks = WEEKDAYS.map(([v, label]) =>
+      `<label><input type="checkbox" data-f="unavailable" value="${v}" ${h.unavailable.includes(v) ? "checked" : ""}>${label}</label>`).join("");
+    tr.innerHTML =
+      `<td><input type="text" data-f="name" value="${esc(h.name)}" size="12"></td>` +
+      `<td><input type="text" data-f="group" value="${esc(h.group)}" size="8"></td>` +
+      `<td class="spots">${spotChecks || '<span class="note">地点を先に登録してください</span>'}</td>` +
+      `<td class="wd">${wdChecks}</td>` +
+      `<td><button class="danger" data-del="${i}">削除</button></td>`;
+    tr.querySelectorAll("input").forEach(inp => {
+      inp.addEventListener("change", () => collectRow(tr, i));
+      inp.addEventListener("input", () => collectRow(tr, i));
+    });
+    tr.querySelector("[data-del]").onclick = () => {
+      edit.households.splice(i, 1);
+      renderRoster();
+    };
+    body.appendChild(tr);
+  });
+}
+
+function collectRow(tr, i) {
+  const h = edit.households[i];
+  h.name = tr.querySelector('[data-f="name"]').value;
+  h.group = tr.querySelector('[data-f="group"]').value;
+  h.spots = [...tr.querySelectorAll('[data-f="spots"]:checked')].map(c => c.value);
+  h.unavailable = [...tr.querySelectorAll('[data-f="unavailable"]:checked')].map(c => Number(c.value));
+}
+
+function collectEditors() {
+  edit.settings.start = document.getElementById("start").value;
+  edit.settings.end = document.getElementById("end").value;
+  document.querySelectorAll("#roster-body tr").forEach((tr, i) => collectRow(tr, i));
+}
+
+// ---------- result ----------
+
+function renderResult() {
+  const p = state.plan;
+  // Problems
+  const prob = document.getElementById("problems");
+  if (p.unassigned.length) {
+    prob.innerHTML = `<div class="problems"><h3>割り当てできなかった枠（${p.unassigned.length}件）</h3>` +
+      p.unassigned.map(u => `<div>${esc(u.date)}（${weekdayOf(u.date)}） ${esc(u.spot)} — ${esc(u.reason)}</div>`).join("") +
+      `</div>`;
+  } else {
+    prob.innerHTML = "";
+  }
+  // Counts
+  const counts = document.getElementById("counts");
+  if (state.counts.length) {
+    counts.innerHTML = "<table><tr><th>世帯</th><th>回数</th></tr>" +
+      state.counts.map(c => `<tr><td>${esc(c.household)}</td><td>${c.count}</td></tr>`).join("") + "</table>";
+  } else {
+    counts.innerHTML = '<p class="note">まだ割り振りがありません。</p>';
+  }
+  // Monthly tables
+  const slotMap = new Map();
+  p.assignments.forEach(a => slotMap.set(a.date + "|" + a.spot, a.household));
+  p.unassigned.forEach(u => { if (!slotMap.has(u.date + "|" + u.spot)) slotMap.set(u.date + "|" + u.spot, ""); });
+  const tables = document.getElementById("tables");
+  if (!p.assignments.length && !p.unassigned.length) {
+    tables.innerHTML = '<p class="note">まだ割り振りがありません。期間と名簿を設定して「割り振りを生成する」を押してください。</p>';
+    return;
+  }
+  // Rows come from the generated slots themselves, so every row on
+  // screen is a slot that really exists in the table.
+  const spotOrder = new Map(p.spots.map((s, i) => [s, i]));
+  const keys = [...slotMap.keys()].sort((a, b) => {
+    const [da, sa] = a.split("|"), [db, sb] = b.split("|");
+    if (da !== db) return da < db ? -1 : 1;
+    return (spotOrder.get(sa) ?? 99) - (spotOrder.get(sb) ?? 99);
+  });
+  const byMonth = new Map();
+  keys.forEach(k => {
+    const m = k.slice(0, 7);
+    if (!byMonth.has(m)) byMonth.set(m, []);
+    byMonth.get(m).push(k);
+  });
+  let html = "";
+  for (const [month, ks] of byMonth) {
+    const [y, m] = month.split("-");
+    html += `<h3>${y}年${Number(m)}月</h3><table><tr><th>日付</th><th>曜日</th><th>地点</th><th>担当世帯</th></tr>`;
+    for (const k of ks) {
+      const [date, spot] = k.split("|");
+      const cur = slotMap.get(k) || "";
+      const opts = ['<option value="">（未割り当て）</option>']
+        .concat(p.households.map(h => `<option value="${esc(h.name)}" ${h.name === cur ? "selected" : ""}>${esc(h.name)}</option>`)).join("");
+      html += `<tr><td>${esc(date)}</td><td>${esc(weekdayOf(date))}</td><td>${esc(spot)}</td>` +
+        `<td><span class="print-name">${esc(cur || "未定")}</span>` +
+        `<select data-date="${esc(date)}" data-spot="${esc(spot)}">${opts}</select></td></tr>`;
+    }
+    html += "</table>";
+  }
+  tables.innerHTML = html;
+  tables.querySelectorAll("select").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      try {
+        state = await api("/api/reassign", {date: sel.dataset.date, spot: sel.dataset.spot, household: sel.value});
+        syncEdit();
+        renderResult();
+        setMsg("main-msg", "割り当てを変更しました。");
+      } catch (e) {
+        alert(e.message);
+        renderResult();
+      }
+    });
+  });
+}
+
+function weekdayOf(dateStr) {
+  const d = state.days.find(x => x.date === dateStr);
+  if (d) return d.weekday;
+  const t = new Date(dateStr + "T00:00:00");
+  return ["日","月","火","水","木","金","土"][t.getDay()] || "";
+}
+
+function syncEdit() {
+  edit = JSON.parse(JSON.stringify({
+    households: state.plan.households,
+    spots: state.plan.spots,
+    settings: state.plan.settings
+  }));
+}
+
+// ---------- wiring ----------
+
+async function save() {
+  collectEditors();
+  state = await api("/api/save", edit);
+  syncEdit();
+  renderEditors();
+  renderResult();
+}
+
+document.getElementById("dayoff-add").onclick = () => {
+  const v = document.getElementById("dayoff-input").value;
+  if (v && !edit.settings.days_off.includes(v)) {
+    edit.settings.days_off.push(v);
+    edit.settings.days_off.sort();
+    renderDaysOff();
+  }
+};
+document.getElementById("spot-add").onclick = () => {
+  const inp = document.getElementById("spot-input");
+  const v = inp.value.trim();
+  if (v && !edit.spots.includes(v)) {
+    edit.spots.push(v);
+    inp.value = "";
+    renderSpotList();
+    renderRoster();
+  }
+};
+document.getElementById("row-add").onclick = () => {
+  collectEditors();
+  edit.households.push({name: "", group: "", spots: [], unavailable: []});
+  renderRoster();
+};
+document.getElementById("save-btn").onclick = async () => {
+  try { await save(); setMsg("main-msg", "保存しました。"); }
+  catch (e) { setMsg("main-msg", e.message, true); }
+};
+document.getElementById("generate-btn").onclick = async () => {
+  try {
+    await save();
+    state = await api("/api/generate", {});
+    syncEdit();
+    renderResult();
+    const n = state.plan.unassigned.length;
+    setMsg("main-msg", n ? `割り振りを生成しました。割り当てできなかった枠が ${n} 件あります（下の一覧で理由を確認してください）。`
+                         : "割り振りを生成しました。全ての枠に割り当てできました。");
+    document.getElementById("sec-result").scrollIntoView({behavior: "smooth"});
+  } catch (e) { setMsg("main-msg", e.message, true); }
+};
+document.getElementById("import-btn").onclick = async () => {
+  try {
+    const res = await api("/api/import", {text: document.getElementById("import-text").value});
+    state = res.state;
+    syncEdit();
+    renderEditors();
+    renderResult();
+    let msg = `${res.imported} 件を取り込みました。`;
+    if (res.skipped && res.skipped.length) msg += `\nすでに名簿にあるため飛ばした世帯: ${res.skipped.join("、")}`;
+    if (res.errors && res.errors.length) msg += "\n読み取れなかった行:\n" + res.errors.join("\n");
+    setMsg("import-msg", msg, res.errors && res.errors.length > 0);
+  } catch (e) { setMsg("import-msg", e.message, true); }
+};
+document.getElementById("csv-btn").onclick = () => { location.href = "/api/export.csv"; };
+document.getElementById("ics-btn").onclick = () => { location.href = "/api/export.ics"; };
+
+(async () => {
+  state = await api("/api/state");
+  syncEdit();
+  renderEditors();
+  renderResult();
+})();
+</script>
+</body>
+</html>
